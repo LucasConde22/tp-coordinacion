@@ -49,7 +49,7 @@ class SumFilter:
             data_output_exchange.send(message_protocol.internal.serialize([client_id]))
 
     def _get_amount_by_fruit(self, client_id):
-        return self.amount_by_client_by_fruit.get(client_id, {})
+        return self.amount_by_client_by_fruit.setdefault(client_id, {})
 
     def process_data_messsage(self, message, ack, nack):
         fields = message_protocol.internal.deserialize(message)
