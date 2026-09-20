@@ -45,6 +45,7 @@ class SumFilter:
                 )
 
         logging.info(f"Broadcasting EOF message")
+        self._broadcast_eof_to_sums(client_id)
         for data_output_exchange in self.data_output_exchanges:
             data_output_exchange.send(message_protocol.internal.serialize([client_id]))
             
@@ -52,6 +53,10 @@ class SumFilter:
 
     def _get_amount_by_fruit(self, client_id):
         return self.amount_by_client_by_fruit.setdefault(client_id, {})
+
+    def _broadcast_eof_to_sums(self, client_id):
+        for _ in range(SUM_AMOUNT - 1):
+            self.input_queue.send(message_protocol.internal.serialize([client_id]))
 
     def process_data_messsage(self, message, ack, nack):
         fields = message_protocol.internal.deserialize(message)
