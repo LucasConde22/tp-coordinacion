@@ -48,7 +48,7 @@ class SumFilter:
         self.control_sender.send(message_protocol.internal.serialize([client_id]))
 
     def _process_eof(self, client_id):
-        logging.info(f"Broadcasting data messages")
+        logging.info(f"Sending data messages to addecuate aggregators")
 
         amount_by_fruit = self._get_amount_by_fruit(client_id)
         for final_fruit_item in amount_by_fruit.values():

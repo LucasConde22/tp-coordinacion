@@ -57,6 +57,7 @@ class AggregationFilter:
 
         self.output_queue.send(message_protocol.internal.serialize([client_id, fruit_top]))
         self.fruit_top_by_client.pop(client_id, None)
+        self.eof_by_client.pop(client_id, None)
 
     def _get_fruit_top(self, client_id):
         return self.fruit_top_by_client.setdefault(client_id, [])
