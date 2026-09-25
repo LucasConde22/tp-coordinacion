@@ -2,6 +2,7 @@ import os
 import logging
 import threading
 import hashlib
+import signal
 
 from common import middleware, message_protocol, fruit_item
 
@@ -14,6 +15,8 @@ SUM_CONTROL_EXCHANGE = "SUM_CONTROL_EXCHANGE"
 CONTROL_ROUTING_KEY = "CONTROL_ROUTING_KEY"
 AGGREGATION_AMOUNT = int(os.environ["AGGREGATION_AMOUNT"])
 AGGREGATION_PREFIX = os.environ["AGGREGATION_PREFIX"]
+
+THREADS_TIMEOUT_TIME = 3
 
 class SumFilter:
     def __init__(self):
@@ -36,6 +39,16 @@ class SumFilter:
         )
 
         self.amount_by_client_by_fruit = {}
+        signal.signal(signal.SIGTERM, self.handle_shutdown)
+        signal.signal(signal.SIGINT, self.handle_shutdown)
+
+    def handle_shutdown(self, signum, frame):
+        logging.info("Received shutdown signal")
+        try:
+            self.input_queue.stop_consuming()
+            self.control_receiver.stop_consuming()
+        except Exception as e:
+            logging.error(f"Error while stopping consumption: {e}")
 
     def _process_data(self, client_id, fruit, amount):
         logging.info(f"Process data")
@@ -89,12 +102,28 @@ class SumFilter:
         ack()
 
     def start(self):
-        threading.Thread(
-            target=lambda: self.control_receiver.start_consuming(self.process_eof_message),
-            daemon=True
-        ).start()
-
-        self.input_queue.start_consuming(self.process_data_messsage)
+        t = None
+        try:
+            t = threading.Thread(
+                target=lambda: self.control_receiver.start_consuming(self.process_eof_message),
+                daemon=True
+            )
+            t.start()
+            self.input_queue.start_consuming(self.process_data_messsage)
+        finally:
+            try:
+                self.input_queue.close()
+                for data_output_exchange in self.data_output_exchanges:
+                                    data_output_exchange.close()
+                self.control_sender.close()
+                self.control_receiver.close()
+            except Exception as e:
+                logging.error(f"Error while closing middlewares: {e}")
+            try:
+                if t is not None:
+                    t.join(timeout=THREADS_TIMEOUT_TIME)
+            except Exception as e:
+                logging.error(f"Error while joining control receiver thread: {e}")
 
 def main():
     logging.basicConfig(level=logging.INFO)
