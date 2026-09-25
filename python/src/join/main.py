@@ -1,5 +1,6 @@
 import os
 import logging
+import signal
 
 from common import middleware, message_protocol, fruit_item
 
@@ -24,6 +25,15 @@ class JoinFilter:
         )
         self.fruit_tops_by_client = {}
         self.eof_by_client = {}
+        signal.signal(signal.SIGTERM, self.handle_shutdown)
+        signal.signal(signal.SIGINT, self.handle_shutdown)
+
+    def handle_shutdown(self, signum, frame):
+        logging.info("Received shutdown signal")
+        try:
+            self.input_queue.stop_consuming()
+        except Exception as e:
+            logging.error(f"Error while stopping consumption in input queue: {e}")
 
     def _update_partial_fruit_tops_for_client(self, client_id, partial_fruit_top):
         client_tops = self._get_client_tops_for(client_id)
@@ -66,13 +76,25 @@ class JoinFilter:
         ack()
 
     def start(self):
-        self.input_queue.start_consuming(self.process_messsage)
+        try:
+            self.input_queue.start_consuming(self.process_messsage)
+        finally:
+            try:
+                self.input_queue.close()
+                self.output_queue.close()
+            except Exception as e:
+                logging.error(f"Error while closing queues: {e}")
 
 
 def main():
     logging.basicConfig(level=logging.INFO)
-    join_filter = JoinFilter()
-    join_filter.start()
+    try:
+        logging.info("Starting join filter")
+        join_filter = JoinFilter()
+        join_filter.start()
+    except Exception as e:
+        logging.error(f"Error in join filter: {e}")
+        return 1
 
     return 0
 
