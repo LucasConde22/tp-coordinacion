@@ -1,6 +1,7 @@
 import os
 import logging
 import bisect
+import signal
 
 from common import middleware, message_protocol, fruit_item
 
@@ -25,6 +26,16 @@ class AggregationFilter:
         )
         self.fruit_top_by_client = {}
         self.eof_by_client = {}
+
+        signal.signal(signal.SIGTERM, self.handle_shutdown)
+        signal.signal(signal.SIGINT, self.handle_shutdown)
+    
+    def handle_shutdown(self, signum, frame):
+        logging.info("Received shutdown signal")
+        try:
+            self.input_exchange.stop_consuming()
+        except Exception as e:
+            logging.error(f"Error while stopping consumption in input exchange: {e}")
 
     def _process_data(self, client_id, fruit, amount):
         logging.info("Processing data message")
@@ -72,13 +83,24 @@ class AggregationFilter:
         ack()
 
     def start(self):
-        self.input_exchange.start_consuming(self.process_messsage)
+        try:
+            self.input_exchange.start_consuming(self.process_messsage)
+        finally:
+            try:
+                self.input_exchange.close()
+                self.output_queue.close()
+            except Exception as e:
+                logging.error(f"Error while closing middlewares: {e}")
 
 
 def main():
     logging.basicConfig(level=logging.INFO)
-    aggregation_filter = AggregationFilter()
-    aggregation_filter.start()
+    try:
+        aggregation_filter = AggregationFilter()
+        aggregation_filter.start()
+    except Exception as e:
+        logging.error(f"Error in aggregation filter: {e}")
+        return 1
     return 0
 
 
