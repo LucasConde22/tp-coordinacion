@@ -1,11 +1,13 @@
 from common import message_protocol
 import uuid
 
+RESULT_MESSAGE_FIELDS = 2
+
+
 class MessageHandler:
 
     def __init__(self):
         self.id = str(uuid.uuid4())
-        pass
     
     def serialize_data_message(self, message):
         [fruit, amount] = message
@@ -16,7 +18,7 @@ class MessageHandler:
 
     def deserialize_result_message(self, message):
         fields = message_protocol.internal.deserialize(message)
-        if not fields or len(fields) != 2:
+        if not fields or len(fields) != RESULT_MESSAGE_FIELDS:
             return None
         
         recv_id, result = fields[0], fields[1]

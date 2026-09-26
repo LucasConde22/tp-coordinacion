@@ -14,6 +14,10 @@ AGGREGATION_AMOUNT = int(os.environ["AGGREGATION_AMOUNT"])
 AGGREGATION_PREFIX = os.environ["AGGREGATION_PREFIX"]
 TOP_SIZE = int(os.environ["TOP_SIZE"])
 
+DATA_MESSAGE_FIELDS = 3
+EOF_MESSAGE_FIELDS = 1
+INITIAL_FRUIT_AMOUNT = 0
+
 
 class AggregationFilter:
 
@@ -40,7 +44,7 @@ class AggregationFilter:
     def _process_data(self, client_id, fruit, amount):
         logging.info("Processing data message")
         amount_by_fruit = self._get_amount_by_fruit(client_id)
-        current_item = amount_by_fruit.get(fruit, fruit_item.FruitItem(fruit, 0))
+        current_item = amount_by_fruit.get(fruit, fruit_item.FruitItem(fruit, INITIAL_FRUIT_AMOUNT))
         amount_by_fruit[fruit] = current_item + fruit_item.FruitItem(fruit, int(amount))
 
     def _process_eof(self, client_id):
@@ -64,9 +68,9 @@ class AggregationFilter:
     def process_messsage(self, message, ack, nack):
         logging.info("Process message")
         fields = message_protocol.internal.deserialize(message)
-        if len(fields) == 3:
+        if len(fields) == DATA_MESSAGE_FIELDS:
             self._process_data(*fields)
-        elif len(fields) == 1:
+        elif len(fields) == EOF_MESSAGE_FIELDS:
             self._process_eof(*fields)
         ack()
 

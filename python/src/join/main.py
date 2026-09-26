@@ -13,6 +13,9 @@ SUM_PREFIX = os.environ["SUM_PREFIX"]
 AGGREGATION_AMOUNT = int(os.environ["AGGREGATION_AMOUNT"])
 AGGREGATION_PREFIX = os.environ["AGGREGATION_PREFIX"]
 TOP_SIZE = int(os.environ["TOP_SIZE"])
+ 
+PARTIAL_TOP_MESSAGE_FIELDS = 2
+INITIAL_FRUIT_AMOUNT = 0
 
 
 class JoinFilter:
@@ -38,9 +41,8 @@ class JoinFilter:
 
     def _update_partial_fruit_tops_for_client(self, client_id, partial_fruit_top):
         client_fruits = self._get_client_fruits_for(client_id)
-        for item in partial_fruit_top:
-            fruit, amount = item[0], item[1]
-            current_item = client_fruits.get(fruit, fruit_item.FruitItem(fruit, 0))
+        for fruit, amount in partial_fruit_top:
+            current_item = client_fruits.get(fruit, fruit_item.FruitItem(fruit, INITIAL_FRUIT_AMOUNT))
             client_fruits[fruit] = current_item + fruit_item.FruitItem(fruit, int(amount))
 
         self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
@@ -65,7 +67,7 @@ class JoinFilter:
     def process_messsage(self, message, ack, nack):
         logging.info("Received partial top")
         fields = message_protocol.internal.deserialize(message)
-        if not fields or len(fields) != 2:
+        if not fields or len(fields) != PARTIAL_TOP_MESSAGE_FIELDS:
             ack()
             return
         client_id, partial_fruit_top = fields[0], fields[1]

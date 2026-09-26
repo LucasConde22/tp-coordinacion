@@ -16,6 +16,10 @@ CONTROL_ROUTING_KEY = "CONTROL_ROUTING_KEY"
 AGGREGATION_AMOUNT = int(os.environ["AGGREGATION_AMOUNT"])
 AGGREGATION_PREFIX = os.environ["AGGREGATION_PREFIX"]
 
+DATA_MESSAGE_FIELDS = 3
+EOF_MESSAGE_FIELDS = 1
+INITIAL_FRUIT_AMOUNT = 0
+ENCODING = "utf-8"
 THREADS_TIMEOUT_TIME = 3
 
 class SumFilter:
@@ -54,7 +58,7 @@ class SumFilter:
         logging.info(f"Process data")
         amount_by_fruit = self._get_amount_by_fruit(client_id)
         amount_by_fruit[fruit] = amount_by_fruit.get(fruit,\
-            fruit_item.FruitItem(fruit, 0)) + fruit_item.FruitItem(fruit, int(amount))
+            fruit_item.FruitItem(fruit, INITIAL_FRUIT_AMOUNT)) + fruit_item.FruitItem(fruit, int(amount))
 
     def _broadcast_eof_to_sums(self, client_id):
         logging.info(f"Broadcasting EOF message for client ID {client_id} to other sums")
@@ -82,21 +86,21 @@ class SumFilter:
         return self.amount_by_client_by_fruit.setdefault(client_id, {})
 
     def _get_aggregator_for_fruit(self, fruit):
-        hashed_fruit =  zlib.adler32(fruit.encode('utf-8'))
+        hashed_fruit = zlib.adler32(fruit.encode(ENCODING))
         return hashed_fruit % AGGREGATION_AMOUNT
 
     def process_data_messsage(self, message, ack, nack):
         fields = message_protocol.internal.deserialize(message)
-        if len(fields) == 3:
+        if len(fields) == DATA_MESSAGE_FIELDS:
             with self.lock:
                 self._process_data(*fields)
-        elif len(fields) == 1:
+        elif len(fields) == EOF_MESSAGE_FIELDS:
             self._broadcast_eof_to_sums(*fields)
         ack()
 
     def process_eof_message(self, message, ack, nack):
         fields = message_protocol.internal.deserialize(message)
-        if len(fields) == 1:
+        if len(fields) == EOF_MESSAGE_FIELDS:
             with self.lock:
                 self._process_eof(*fields)
         ack()
@@ -114,7 +118,7 @@ class SumFilter:
             try:
                 self.input_queue.close()
                 for data_output_exchange in self.data_output_exchanges:
-                                    data_output_exchange.close()
+                    data_output_exchange.close()
                 self.control_sender.close()
                 self.control_receiver.close()
             except Exception as e:
