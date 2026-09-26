@@ -88,6 +88,7 @@ class AggregationFilter:
 def main():
     logging.basicConfig(level=logging.INFO)
     try:
+        logging.info("Starting aggregation filter")
         aggregation_filter = AggregationFilter()
         aggregation_filter.start()
     except Exception as e:

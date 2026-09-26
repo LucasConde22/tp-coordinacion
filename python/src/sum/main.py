@@ -17,7 +17,10 @@ AGGREGATION_AMOUNT = int(os.environ["AGGREGATION_AMOUNT"])
 AGGREGATION_PREFIX = os.environ["AGGREGATION_PREFIX"]
 
 DATA_MESSAGE_FIELDS = 3
-EOF_MESSAGE_FIELDS = 1
+GATEWAY_EOF_MESSAGE_FIELDS = 2
+CONTROL_EOF_MESSAGE_FIELDS = 1
+REPORT_EOF_MESSAGE_FIELDS = 2
+REPORT_EOF_TO_AGGREGATORS_FLAG = -1
 INITIAL_FRUIT_AMOUNT = 0
 ENCODING = "utf-8"
 THREADS_TIMEOUT_TIME = 3
@@ -43,6 +46,9 @@ class SumFilter:
         )
 
         self.amount_by_client_by_fruit = {}
+        self.messages_count_by_client = {}
+        self.received_eof = {}
+        self.client_ids_to_report = set()
         signal.signal(signal.SIGTERM, self.handle_shutdown)
         signal.signal(signal.SIGINT, self.handle_shutdown)
 
@@ -56,15 +62,40 @@ class SumFilter:
 
     def _process_data(self, client_id, fruit, amount):
         logging.info(f"Process data")
+        self._increment_messages_count(client_id)
         amount_by_fruit = self._get_amount_by_fruit(client_id)
         amount_by_fruit[fruit] = amount_by_fruit.get(fruit,\
             fruit_item.FruitItem(fruit, INITIAL_FRUIT_AMOUNT)) + fruit_item.FruitItem(fruit, int(amount))
+
+        if client_id in self.client_ids_to_report:
+            self._send_data_to_aggregators(client_id)
+
+    def _manage_eof_message(self, client_id, total_messages):
+        logging.info(f"Received EOF for client ID: {client_id} with total amount of messages: {total_messages}")
+        self.received_eof[client_id] = (total_messages, 0)
+        self._broadcast_eof_to_sums(client_id)
 
     def _broadcast_eof_to_sums(self, client_id):
         logging.info(f"Broadcasting EOF message for client ID {client_id} to other sums")
         self.control_sender.send(message_protocol.internal.serialize([client_id]))
 
+    def _broadcast_eof_completition(self, client_id):
+        logging.info(f"Broadcasting EOF completition message for client ID {client_id} to other sums")
+        self.control_sender.send(message_protocol.internal.serialize([client_id, REPORT_EOF_TO_AGGREGATORS_FLAG]))
+
     def _process_eof(self, client_id):
+        self.client_ids_to_report.add(client_id)
+        self._send_data_to_aggregators(client_id)
+
+    def _process_eof_completion(self, client_id):
+        logging.info(f"Processing EOF completion for client ID: {client_id}")
+        self.client_ids_to_report.discard(client_id)
+
+        logging.info(f"Broadcasting EOF message to aggregators for client ID {client_id}")
+        for data_output_exchange in self.data_output_exchanges:
+            data_output_exchange.send(message_protocol.internal.serialize([client_id]))
+
+    def _send_data_to_aggregators(self, client_id):
         logging.info(f"Sending data messages to addecuate aggregators")
 
         amount_by_fruit = self._get_amount_by_fruit(client_id)
@@ -76,33 +107,58 @@ class SumFilter:
                 )
             )
 
-        logging.info(f"Broadcasting EOF message")
-        for data_output_exchange in self.data_output_exchanges:
-            data_output_exchange.send(message_protocol.internal.serialize([client_id]))
-            
         self.amount_by_client_by_fruit.pop(client_id, None)
+        messages_count = self.messages_count_by_client.pop(client_id, 0)
+        self._report_amount_of_received_messages(client_id, messages_count)
+
+    def _report_amount_of_received_messages(self, client_id, messages_amount):
+        logging.info(f"Reporting amount of received messages for client ID {client_id}: {messages_amount}")
+        self.control_sender.send(message_protocol.internal.serialize([client_id, messages_amount]))
 
     def _get_amount_by_fruit(self, client_id):
         return self.amount_by_client_by_fruit.setdefault(client_id, {})
 
+    def _increment_messages_count(self, client_id):
+        self.messages_count_by_client[client_id] = self.messages_count_by_client.get(client_id, 0) + 1
+
     def _get_aggregator_for_fruit(self, fruit):
         hashed_fruit = zlib.adler32(fruit.encode(ENCODING))
         return hashed_fruit % AGGREGATION_AMOUNT
+
+    def _update_received_messages_amount(self, client_id, new_messages_amount):
+        if not client_id in self.received_eof:
+            return
+        
+        total_messages, received_messages_amount = self.received_eof[client_id]
+        updated_amount = received_messages_amount + new_messages_amount
+        self.received_eof[client_id] = (total_messages, updated_amount)
+        logging.info(f"[Coordinator for client {client_id}] Increased received messages amount by {updated_amount}")
+
+        if updated_amount >= total_messages:
+            self.received_eof.pop(client_id, None)
+            self._broadcast_eof_completition(client_id)
 
     def process_data_messsage(self, message, ack, nack):
         fields = message_protocol.internal.deserialize(message)
         if len(fields) == DATA_MESSAGE_FIELDS:
             with self.lock:
                 self._process_data(*fields)
-        elif len(fields) == EOF_MESSAGE_FIELDS:
-            self._broadcast_eof_to_sums(*fields)
+        elif len(fields) == GATEWAY_EOF_MESSAGE_FIELDS:
+            with self.lock:
+                self._manage_eof_message(*fields)
         ack()
 
     def process_eof_message(self, message, ack, nack):
         fields = message_protocol.internal.deserialize(message)
-        if len(fields) == EOF_MESSAGE_FIELDS:
+        if len(fields) == CONTROL_EOF_MESSAGE_FIELDS:
             with self.lock:
                 self._process_eof(*fields)
+        elif len(fields) == REPORT_EOF_MESSAGE_FIELDS:
+            with self.lock:
+                if fields[1] == REPORT_EOF_TO_AGGREGATORS_FLAG:
+                    self._process_eof_completion(fields[0])
+                else:
+                    self._update_received_messages_amount(*fields)
         ack()
 
     def start(self):
@@ -131,8 +187,13 @@ class SumFilter:
 
 def main():
     logging.basicConfig(level=logging.INFO)
-    sum_filter = SumFilter()
-    sum_filter.start()
+    try:
+        logging.info("Starting sum filter")
+        sum_filter = SumFilter()
+        sum_filter.start()
+    except Exception as e:
+        logging.error(f"Error in sum filter: {e}")
+        return 1
     return 0
 
 
