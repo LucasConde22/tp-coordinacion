@@ -1,6 +1,6 @@
 import os
 import logging
-import bisect
+import heapq
 import signal
 
 from common import middleware, message_protocol, fruit_item
@@ -24,7 +24,7 @@ class AggregationFilter:
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
             MOM_HOST, OUTPUT_QUEUE
         )
-        self.fruit_top_by_client = {}
+        self.amount_by_client_by_fruit = {}
         self.eof_by_client = {}
 
         signal.signal(signal.SIGTERM, self.handle_shutdown)
@@ -39,16 +39,9 @@ class AggregationFilter:
 
     def _process_data(self, client_id, fruit, amount):
         logging.info("Processing data message")
-
-        fruit_top = self._get_fruit_top(client_id)
-        for i in range(len(fruit_top)):
-            if fruit_top[i].fruit == fruit:
-                fruit_top[i] = fruit_top[i] + fruit_item.FruitItem(
-                    fruit, amount
-                )
-                fruit_top.sort()
-                return
-        bisect.insort(fruit_top, fruit_item.FruitItem(fruit, amount))
+        amount_by_fruit = self._get_amount_by_fruit(client_id)
+        current_item = amount_by_fruit.get(fruit, fruit_item.FruitItem(fruit, 0))
+        amount_by_fruit[fruit] = current_item + fruit_item.FruitItem(fruit, int(amount))
 
     def _process_eof(self, client_id):
         self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
@@ -56,22 +49,17 @@ class AggregationFilter:
         if self.eof_by_client[client_id] != SUM_AMOUNT:
             return
 
-        fruit_top = self._get_fruit_top(client_id)
-        fruit_chunk = list(fruit_top[-TOP_SIZE:])
-        fruit_chunk.reverse()
-        fruit_top = list(
-            map(
-                lambda fruit_item: (fruit_item.fruit, fruit_item.amount),
-                fruit_chunk,
-            )
-        )
+        amount_by_fruit = self._get_amount_by_fruit(client_id)
+        # nlargest usa un Min-Heap para sacar a los K mayores en tiempo O(N log K)
+        top_items = heapq.nlargest(TOP_SIZE, amount_by_fruit.values())
+        fruit_top = [(item.fruit, item.amount) for item in top_items]
 
         self.output_queue.send(message_protocol.internal.serialize([client_id, fruit_top]))
-        self.fruit_top_by_client.pop(client_id, None)
+        self.amount_by_client_by_fruit.pop(client_id, None)
         self.eof_by_client.pop(client_id, None)
 
-    def _get_fruit_top(self, client_id):
-        return self.fruit_top_by_client.setdefault(client_id, [])
+    def _get_amount_by_fruit(self, client_id):
+        return self.amount_by_client_by_fruit.setdefault(client_id, {})
 
     def process_messsage(self, message, ack, nack):
         logging.info("Process message")
