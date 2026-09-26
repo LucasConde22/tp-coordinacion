@@ -23,7 +23,7 @@ REPORT_EOF_MESSAGE_FIELDS = 2
 REPORT_EOF_TO_AGGREGATORS_FLAG = -1
 INITIAL_FRUIT_AMOUNT = 0
 ENCODING = "utf-8"
-THREADS_TIMEOUT_TIME = 3
+THREADS_TIMEOUT_TIME = 3 # Definido por las dudas, aunque el thread hijo finaliza en menos tiempo.
 
 class SumFilter:
     def __init__(self):
@@ -56,7 +56,7 @@ class SumFilter:
         logging.info("Received shutdown signal")
         try:
             self.input_queue.stop_consuming()
-            self.control_receiver.stop_consuming()
+            self.control_receiver.threadsafe_stop_consuming()
         except Exception as e:
             logging.error(f"Error while stopping consumption: {e}")
 
@@ -166,11 +166,16 @@ class SumFilter:
         try:
             t = threading.Thread(
                 target=lambda: self.control_receiver.start_consuming(self.process_eof_message),
-                daemon=True
+                daemon=True # Marcado como deamon por las dudas, de todas formas se hace el join.
             )
             t.start()
             self.input_queue.start_consuming(self.process_data_messsage)
         finally:
+            try:
+                if t is not None and t.is_alive():
+                    t.join(timeout=THREADS_TIMEOUT_TIME)
+            except Exception as e:
+                logging.error(f"Error while joining control receiver thread: {e}")
             try:
                 self.input_queue.close()
                 for data_output_exchange in self.data_output_exchanges:
@@ -179,11 +184,6 @@ class SumFilter:
                 self.control_receiver.close()
             except Exception as e:
                 logging.error(f"Error while closing middlewares: {e}")
-            try:
-                if t is not None:
-                    t.join(timeout=THREADS_TIMEOUT_TIME)
-            except Exception as e:
-                logging.error(f"Error while joining control receiver thread: {e}")
 
 def main():
     logging.basicConfig(level=logging.INFO)

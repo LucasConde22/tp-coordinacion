@@ -48,18 +48,12 @@ class _MessageMiddlewareRabbitMQ(MessageMiddleware):
             self.is_consuming = False
 
     def stop_consuming(self):
-        if not self.is_consuming:
-            return
-        
-        self._assert_connection_is_open()
-        self._assert_channel_is_open()
+        self._stop_consuming(self.channel.stop_consuming)
 
-        try:
-            self.channel.stop_consuming()
-        except self._DISCONNECTED_ERRORS as e:
-            raise MessageMiddlewareDisconnectedError(e)
-        finally:
-            self.is_consuming = False
+    def threadsafe_stop_consuming(self):
+        self._stop_consuming(
+            lambda: self.connection.add_callback_threadsafe(self.channel.stop_consuming)
+        )   
 
     def close(self):
         try:
@@ -67,6 +61,20 @@ class _MessageMiddlewareRabbitMQ(MessageMiddleware):
                 self.connection.close()
         except Exception as e:
             raise MessageMiddlewareCloseError(e)
+
+    def _stop_consuming(self, stop_consuming_method):
+        if not self.is_consuming:
+            return
+        
+        self._assert_connection_is_open()
+        self._assert_channel_is_open()
+
+        try:
+            stop_consuming_method()
+        except Exception as e:
+            raise MessageMiddlewareDisconnectedError(e)
+        finally:
+            self.is_consuming = False
 
     def _publish(self, exchange, routing_key, message):
         try:
