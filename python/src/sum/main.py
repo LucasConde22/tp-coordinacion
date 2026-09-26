@@ -1,7 +1,7 @@
 import os
 import logging
 import threading
-import hashlib
+import zlib
 import signal
 
 from common import middleware, message_protocol, fruit_item
@@ -82,8 +82,8 @@ class SumFilter:
         return self.amount_by_client_by_fruit.setdefault(client_id, {})
 
     def _get_aggregator_for_fruit(self, fruit):
-        hashed_fruit =  hashlib.sha256(fruit.encode('utf-8')).hexdigest()
-        return int(hashed_fruit, 16) % AGGREGATION_AMOUNT
+        hashed_fruit =  zlib.adler32(fruit.encode('utf-8'))
+        return hashed_fruit % AGGREGATION_AMOUNT
 
     def process_data_messsage(self, message, ack, nack):
         fields = message_protocol.internal.deserialize(message)
