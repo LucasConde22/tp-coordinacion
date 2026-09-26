@@ -1,6 +1,7 @@
 import os
 import logging
 import signal
+import heapq
 
 from common import middleware, message_protocol, fruit_item
 
@@ -36,10 +37,11 @@ class JoinFilter:
             logging.error(f"Error while stopping consumption in input queue: {e}")
 
     def _update_partial_fruit_tops_for_client(self, client_id, partial_fruit_top):
-        client_tops = self._get_client_tops_for(client_id)
+        client_fruits = self._get_client_fruits_for(client_id)
         for item in partial_fruit_top:
             fruit, amount = item[0], item[1]
-            client_tops.append(fruit_item.FruitItem(fruit, amount))
+            current_item = client_fruits.get(fruit, fruit_item.FruitItem(fruit, 0))
+            client_fruits[fruit] = current_item + fruit_item.FruitItem(fruit, int(amount))
 
         self.eof_by_client[client_id] = self.eof_by_client.get(client_id, 0) + 1
         logging.info(
@@ -48,18 +50,17 @@ class JoinFilter:
 
     def _send_final_top(self, client_id):
         logging.info(f"All partial tops were received for client ID: {client_id}")
-        client_tops = self._get_client_tops_for(client_id)
-        client_tops.sort(reverse=True)
-        final_fruit_chunk = client_tops[:TOP_SIZE]
-        final_top = [(item.fruit, item.amount) for item in final_fruit_chunk]
+        client_fruits = self._get_client_fruits_for(client_id)
+        top_items = heapq.nlargest(TOP_SIZE, client_fruits.values())
+        final_top = [(item.fruit, item.amount) for item in top_items]
         self.output_queue.send(
             message_protocol.internal.serialize([client_id, final_top])
         )
         self.fruit_tops_by_client.pop(client_id, None)
         self.eof_by_client.pop(client_id, None)
 
-    def _get_client_tops_for(self, client_id):
-        return self.fruit_tops_by_client.setdefault(client_id, [])
+    def _get_client_fruits_for(self, client_id):
+        return self.fruit_tops_by_client.setdefault(client_id, {})
 
     def process_messsage(self, message, ack, nack):
         logging.info("Received partial top")
