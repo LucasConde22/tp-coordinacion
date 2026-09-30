@@ -1,0 +1,44 @@
+name: CI Tests
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Escenario ${{ matrix.scenario }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [1, 2, 3, 4, 5]
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias
+        run: |
+          pip install --upgrade pip
+          pip install -r python/requirements.txt
+
+      - name: Seleccionar Escenario ${{ matrix.scenario }}
+        run: |
+          cp python/scenarios/${{ matrix.scenario }}.yaml python/docker-compose.yaml
+
+      - name: Ejecutar pruebas
+        run: |
+          make -C python test
+
+      - name: Mostrar logs
+        if: failure()
+        run: |
+          docker compose -f python/docker-compose.yaml logs
