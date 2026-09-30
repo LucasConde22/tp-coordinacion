@@ -121,20 +121,31 @@ class MessageMiddlewareExchangeRabbitMQ(_MessageMiddlewareRabbitMQ, MessageMiddl
             self.channel.exchange_declare(
                         exchange=exchange_name,
                         exchange_type=self._DIRECT_EXCHANGE_TYPE)
-
-            self.queue_name = self.channel\
-                                        .queue_declare('', exclusive=True)\
-                                        .method.queue
-
-            for routing_key in routing_keys:
-                self.channel.queue_bind(exchange=exchange_name,
-                                        queue=self.queue_name,
-                                        routing_key=routing_key)
-            
         except self._DISCONNECTED_ERRORS as e:
             raise MessageMiddlewareDisconnectedError(e)
         except Exception as e:
             raise MessageMiddlewareMessageError(e)
+
+    def start_consuming(self, on_message_callback):
+        self._assert_connection_is_open()
+        self._assert_channel_is_open()
+
+        if not self.queue_name:
+            try:
+                self.queue_name = self.channel\
+                                            .queue_declare('', exclusive=True)\
+                                            .method.queue
+
+                for routing_key in self.routing_keys:
+                    self.channel.queue_bind(exchange=self.exchange_name,
+                                            queue=self.queue_name,
+                                            routing_key=routing_key)
+            except self._DISCONNECTED_ERRORS as e:
+                raise MessageMiddlewareDisconnectedError(e)
+            except Exception as e:
+                raise MessageMiddlewareMessageError(e)
+
+        super().start_consuming(on_message_callback)
 
     def send(self, message):
         self._assert_connection_is_open()
