@@ -153,6 +153,16 @@ El sistema aborda la escalabilidad en tres aspectos fundamentales:
 - **Capa de Aggregation**: Al aumentar `AGGREGATION_AMOUNT`, la función de hash distribuye las frutas en un mayor número de nodos, reduciendo la memoria y el trabajo de cómputo en cada aggregator.
 - **Configuración de Multiplicidad**: La multiplicidad de réplicas se define exclusivamente mediante variables de entorno (`SUM_AMOUNT`, `AGGREGATION_AMOUNT`, `TOP_SIZE`), sin requerir modificaciones en el código.
 
+### 6.4. Escalabilidad vs Elasticidad
+Es importante destacar que el sistema resultante es **escalable pero no elástico**:
+- **Escalabilidad**: Posee la capacidad de tolerar mayores volúmenes de datos y clientes simplemente configurando una mayor cantidad de réplicas tanto en la etapa de suma como en la de agregación, distribuyendo el cómputo y el consumo de memoria de forma horizontal.
+- **Falta de Elasticidad**: No es posible incorporar ni remover réplicas de manera dinámica durante la ejecución. Parámetros críticos como `SUM_AMOUNT` y `AGGREGATION_AMOUNT` son configurados como variables de entorno al inicializar los contenedores y se asumen constantes:
+  - En `AggregationFilter`, la barrera de sincronización espera recibir exactamente `SUM_AMOUNT` mensajes de fin para cerrar el cliente. Modificar la cantidad de instancias de `Sum` en ejecución generaría bloqueos indefinidos o emisiones prematuras del top parcial.
+  - En `JoinFilter`, se espera recibir exactamente `AGGREGATION_AMOUNT` tops parciales para consolidar el top global.
+  - En `SumFilter`, el particionamiento de frutas se computa mediante `hash(fruta) % AGGREGATION_AMOUNT` sobre routing keys fijas. Variar dinámicamente `AGGREGATION_AMOUNT` alteraría el destino de las frutas, fragmentando los subtotales.
+
+Por lo tanto, para escalar el sistema ante un incremento de demanda es necesario reconfigurar la cantidad de réplicas deseadas en el archivo de orquestación (`docker-compose.yaml`) e iniciar el entorno.
+
 ---
 
 ## 7. Ejecución
