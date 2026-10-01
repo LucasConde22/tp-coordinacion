@@ -167,6 +167,8 @@ Por lo tanto, para escalar el sistema ante un incremento de demanda es necesario
 
 ## 7. Ejecución
 
+**Aclaración**: Los siguientes comandos deben ejecutarse dentro del directorio `python`.
+
 - **Selección de Escenario de Prueba**:
   ```bash
   make switch
